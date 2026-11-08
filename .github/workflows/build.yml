@@ -1,0 +1,112 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: third_party/cef/*.tar.bz2
+          key: cef-windows64-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --target SchuWebRosol
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "dist/SchuWebRosol"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item -Recurse build/src/Release/* $out
+          Get-ChildItem $out -Include *.lib,*.exp,*.pdb -Recurse | Remove-Item
+          Copy-Item README.md $out
+          Compress-Archive -Path $out -DestinationPath dist/SchuWebRosol-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SchuWebRosol-windows-x64
+          path: dist/SchuWebRosol-windows-x64.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SchuWebRosol-windows-x64.zip
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+            cef: macosarm64
+          - arch: x86_64
+            runner: macos-13
+            cef: macosx64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: third_party/cef/*.tar.bz2
+          key: cef-${{ matrix.cef }}-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPROJECT_ARCH=${{ matrix.arch }}
+      - name: Build
+        run: cmake --build build --target SchuWebRosol
+      - name: Package
+        run: |
+          mkdir -p dist
+          app=build/src/Release/SchuWebRosol.app
+          # Ad-hoc signature so Gatekeeper accepts it after "Open anyway".
+          codesign --force --deep --sign - "$app"
+          ditto -c -k --keepParent "$app" dist/SchuWebRosol-macos-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SchuWebRosol-macos-${{ matrix.arch }}
+          path: dist/SchuWebRosol-macos-${{ matrix.arch }}.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SchuWebRosol-macos-${{ matrix.arch }}.zip
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: third_party/cef/*.tar.bz2
+          key: cef-linux64-${{ hashFiles('CMakeLists.txt') }}
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libx11-dev xvfb libnss3 libatk-bridge2.0-0 libgbm1 libasound2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 libpango-1.0-0
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --target SchuWebRosol
+      - name: Smoke test (render a page to a file)
+        run: |
+          cat > /tmp/test.html <<'HTML'
+          <html><body style="margin:0;background:#ff0000"></body></html>
+          HTML
+          SCHUWEBROSOL_DUMP=$PWD/frame.ppm timeout 20 xvfb-run -a build/src/Release/SchuWebRosol \
+            --no-ui --instance=ci --url=file:///tmp/test.html --width=320 --height=240 || true
+          python3 - <<'PY'
+          data = open("frame.ppm", "rb").read()
+          header, pixels = data.split(b"\n", 3)[:3], data.split(b"\n", 3)[3]
+          assert header[1] == b"320 240", header
+          r, g, b = pixels[0], pixels[1], pixels[2]
+          assert (r, g, b) == (255, 0, 0), (r, g, b)
+          print("OK: frame", header[1].decode(), "first pixel", (r, g, b))
+          PY
