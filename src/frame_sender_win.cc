@@ -1,6 +1,10 @@
 #include "frame_sender.h"
 
+// Spout redefines WIN32_LEAN_AND_MEAN, which CEF already sets globally.
+#pragma warning(push)
+#pragma warning(disable : 4005)
 #include "SpoutDX.h"
+#pragma warning(pop)
 
 namespace {
 
