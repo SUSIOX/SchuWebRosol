@@ -1,0 +1,7 @@
+/build*/
+/third_party/
+/out/
+.DS_Store
+*.swp
+.vscode/
+.idea/
