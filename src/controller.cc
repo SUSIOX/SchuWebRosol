@@ -147,9 +147,21 @@ void Controller::ApplySettings(const Settings& requested) {
   CefRefPtr<CefFrame> frame = host->GetBrowser()->GetMainFrame();
   if (next.url != prev.url) {
     frame->LoadURL(next.url);
-  } else if (next.custom_css != prev.custom_css ||
-             next.hide_scrollbars != prev.hide_scrollbars) {
-    InjectPageTweaks(frame);
+  } else {
+    if (next.custom_css != prev.custom_css ||
+        next.hide_scrollbars != prev.hide_scrollbars) {
+      InjectPageTweaks(frame);
+    }
+    if (next.custom_js != prev.custom_js && !next.custom_js.empty()) {
+      frame->ExecuteJavaScript(next.custom_js, frame->GetURL(), 0);
+    }
+  }
+}
+
+void Controller::InvalidateOutput() {
+  CEF_REQUIRE_UI_THREAD();
+  if (CefRefPtr<CefBrowserHost> host = OutputHost()) {
+    host->Invalidate(PET_VIEW);
   }
 }
 
@@ -458,8 +470,14 @@ CefRefPtr<CefDictionaryValue> Controller::GetStatus() {
 
 std::string Controller::GetPreviewBmp() {
   std::lock_guard<std::mutex> lock(mutex_);
-  preview_wanted_until_ =
-      std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  const auto now = std::chrono::steady_clock::now();
+  if (now > preview_wanted_until_) {
+    // Frames painted while nobody watched were not copied; static pages
+    // would never repaint on their own.
+    CefPostTask(TID_UI, base::BindOnce(&Controller::InvalidateOutput,
+                                       base::Unretained(this)));
+  }
+  preview_wanted_until_ = now + std::chrono::seconds(3);
   if (preview_.empty()) {
     return std::string();
   }

@@ -37,7 +37,10 @@ class SyphonFrameSender : public FrameSender {
                                         height:height
                                      mipmapped:NO];
         desc.usage = MTLTextureUsageShaderRead;
-        desc.storageMode = MTLStorageModeManaged;
+        // Apple Silicon (unified memory) uploads into shared storage; discrete
+        // and Intel GPUs need managed storage for CPU-written textures.
+        desc.storageMode = device_.hasUnifiedMemory ? MTLStorageModeShared
+                                                    : MTLStorageModeManaged;
         texture_ = [device_ newTextureWithDescriptor:desc];
         if (!texture_) {
           return false;
