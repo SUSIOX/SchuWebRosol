@@ -37,7 +37,11 @@ class SyphonFrameSender : public FrameSender {
                                         height:height
                                      mipmapped:NO];
         desc.usage = MTLTextureUsageShaderRead;
-        desc.storageMode = MTLStorageModeManaged;
+        // Apple GPUs support shared textures; Intel and discrete GPUs need
+        // managed storage for CPU-written textures.
+        desc.storageMode = [device_ supportsFamily:MTLGPUFamilyApple1]
+                               ? MTLStorageModeShared
+                               : MTLStorageModeManaged;
         texture_ = [device_ newTextureWithDescriptor:desc];
         if (!texture_) {
           return false;

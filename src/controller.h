@@ -27,6 +27,7 @@ class Controller {
   void Start(CefRefPtr<CefCommandLine> command_line);
   void ApplySettings(const Settings& next);
   void Reload();
+  void InvalidateOutput();
   void Click(double x, double y);
   void Scroll(int delta_y);
   void TypeText(const std::string& text);
